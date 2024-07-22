@@ -927,6 +927,13 @@ def _parse_usage_model(usage: typing.Union[pydantic.BaseModel, dict]):
 def _parse_usage(response: LLMResult):
     # langchain-anthropic uses the usage field
     llm_usage_keys = ["token_usage", "usage"]
+    # token_usage: qwen;
+    llm_generation_usage_keys = ["token_usage", "usage_metadata"]
+    # usage: Bedrock-Anthropic; amazon-bedrock-invocationMetrics: Bedrock-Titan
+    llm_generation_chunk_usage_keys = [
+        "usage",
+        "amazon-bedrock-invocationMetrics",
+    ]
     llm_usage = None
     if response.llm_output is not None:
         for key in llm_usage_keys:
@@ -937,32 +944,22 @@ def _parse_usage(response: LLMResult):
     if hasattr(response, "generations"):
         for generation in response.generations:
             for generation_chunk in generation:
-                if generation_chunk.generation_info and (
-                    "usage_metadata" in generation_chunk.generation_info
-                ):
-                    llm_usage = _parse_usage_model(
-                        generation_chunk.generation_info["usage_metadata"]
-                    )
-                    break
+                info = generation_chunk.generation_info
+                if info:
+                    for key in llm_generation_usage_keys:
+                        if key in info:
+                            llm_usage = _parse_usage_model(info[key])
+                            break
 
                 message_chunk = getattr(generation_chunk, "message", {})
                 response_metadata = getattr(message_chunk, "response_metadata", {})
-
-                chunk_usage = (
-                    response_metadata.get("usage", None)  # for Bedrock-Anthropic
-                    if isinstance(response_metadata, dict)
-                    else None
-                ) or (
-                    response_metadata.get(
-                        "amazon-bedrock-invocationMetrics", None
-                    )  # for Bedrock-Titan
-                    if isinstance(response_metadata, dict)
-                    else None
-                )
-
-                if chunk_usage:
-                    llm_usage = _parse_usage_model(chunk_usage)
-                    break
+                if response_metadata:
+                    for key in llm_generation_chunk_usage_keys:
+                        if key in response_metadata:
+                            chunk_usage = response_metadata[key]
+                            if chunk_usage and isinstance(chunk_usage, dict):
+                                llm_usage = _parse_usage_model(chunk_usage)
+                                break
 
     return llm_usage
 
